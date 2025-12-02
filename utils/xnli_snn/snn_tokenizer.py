@@ -91,7 +91,7 @@ class SNNTokenizer(nn.Module):
         soft_boundaries = torch.sigmoid(boundary_logits)  # (B, T)
         hard_boundaries = spikes.squeeze(-1).transpose(0, 1)  # (B, T)
 
-        # === Step 4: Apply UTF-8 boundary mask ===
+        # === Step 6: Apply UTF-8 boundary mask ===
         soft_boundaries = soft_boundaries * boundary_mask + (-1e4) * (1 - boundary_mask)
         hard_boundaries = hard_boundaries * boundary_mask
 
