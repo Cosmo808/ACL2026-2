@@ -28,9 +28,9 @@ class SNNTokenizer(nn.Module):
             nn.Linear(char_embed_dim, ann_hidden_dim),
             nn.GELU(),
             nn.LayerNorm(ann_hidden_dim),
-            nn.Linear(ann_hidden_dim, ann_hidden_dim),
-            nn.GELU(),
-            nn.LayerNorm(ann_hidden_dim)
+            # nn.Linear(ann_hidden_dim, ann_hidden_dim),
+            # nn.GELU(),
+            # nn.LayerNorm(ann_hidden_dim)
         )
 
         # === 3. Boundary & Reset Predictors (identical structure) ===
@@ -72,15 +72,10 @@ class SNNTokenizer(nn.Module):
 
         # === Step 3: Predict boundary and reset logits ===
         boundary_logits = self.boundary_predictor(hidden).squeeze(-1)  # (B, T)
+        self.I = boundary_logits
         reset_logits = self.reset_predictor(hidden).squeeze(-1)        # (B, T)
 
-        # === Step 4: Apply UTF-8 boundary mask ===
-        boundary_logits = boundary_logits * boundary_mask + (-1e4) * (1 - boundary_mask)
-
-        # === Step 5: Get soft boundaries (for training) ===
-        soft_boundaries = torch.sigmoid(boundary_logits)               # (B, T)
-
-        # === Step 6: Prepare SNN input and reset mask ===
+        # === Step 4: Spiking neuron and reset mask ===
         # SNN input: boundary_logits as (T, B, 1)
         snn_input = boundary_logits.transpose(0, 1).unsqueeze(-1)      # (T, B, 1)
 
@@ -91,7 +86,14 @@ class SNNTokenizer(nn.Module):
         # Set reset mask and run SNN in multi-step mode
         self.node.set_reset_mask(reset_mask)
         spikes = self.node(snn_input)                                 # (T, B, 1)
-        hard_boundaries = spikes.squeeze(-1).transpose(0, 1)          # (B, T)
+
+        # === Step 5: Get boundaries===
+        soft_boundaries = torch.sigmoid(boundary_logits)  # (B, T)
+        hard_boundaries = spikes.squeeze(-1).transpose(0, 1)  # (B, T)
+
+        # === Step 4: Apply UTF-8 boundary mask ===
+        soft_boundaries = soft_boundaries * boundary_mask + (-1e4) * (1 - boundary_mask)
+        hard_boundaries = hard_boundaries * boundary_mask
 
         # === Step 7: Choose boundary type ===
         if use_hard_boundaries:
@@ -112,7 +114,6 @@ class SNNTokenizer(nn.Module):
         self.soft_boundaries = soft_boundaries
         self.hard_boundaries = hard_boundaries
         self.reset_logits = reset_logits
-        self.I = boundary_logits
         self.token_ids = token_ids
 
         return inputs_embeds
