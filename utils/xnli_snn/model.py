@@ -1,12 +1,12 @@
 import logging
 import torch.nn as nn
-import numpy as np
 import torch
 import torch.nn.functional as F
 from transformers.modeling_outputs import SequenceClassifierOutput
 from transformers import AutoConfig, AutoModelForSequenceClassification, AutoTokenizer, AutoModelForMaskedLM
 from peft import AdaLoraConfig, LoraConfig, PeftConfig, PeftModel, TaskType
 from spikingjelly.activation_based import functional
+
 from utils.xnli_snn.snn_tokenizer import SNNTokenizer
 from utils.xnli_snn.neurons import MembraneLoss
 
@@ -49,7 +49,7 @@ class TkLM(nn.Module):
                 token_str = token[1:] if token.startswith("▁") else token
                 try:
                     token_bytes = token_str.encode('utf-8')
-                except:
+                except UnicodeEncodeError:
                     token_bytes = b''
                 if len(token_bytes) == 0:
                     continue
@@ -67,9 +67,8 @@ class TkLM(nn.Module):
 
         # === 3. Top 20% high-entropy tokens ===
         reset_target = None
+        token_entropy = self.chunked_topk_token_entropy(inputs_embeds, chunk_size=32, k=100)
         if self.entropy:
-            token_entropy = self.chunked_topk_token_entropy(inputs_embeds, chunk_size=32, k=100)
-
             # B, L = token_entropy.shape
             # k = max(1, int(0.2 * L))
             # entropy_top_mask = torch.zeros_like(gt_boundaries, dtype=torch.bool)  # (B, T)
@@ -83,17 +82,22 @@ class TkLM(nn.Module):
 
             token_ids = self.snn_tokenizer.token_ids  # (B, T)
             B, L = token_entropy.shape
-            T_char = gt_boundaries.shape[1]
+            T = gt_boundaries.shape[1]
+
             k_tokens = max(1, int(0.2 * L))
             _, top_token_indices = torch.topk(token_entropy, k_tokens, dim=1)  # (B, k_tokens)
-            first_pos = torch.full((B, L), T_char, dtype=torch.long, device=token_ids.device)
+
+            first_pos = torch.full((B, L), T, dtype=torch.long, device=token_ids.device)
             batch_idx = torch.arange(B, device=token_ids.device).unsqueeze(1)  # (B, 1)
-            char_positions = torch.arange(T_char, device=token_ids.device).unsqueeze(0).expand(B, T_char)  # (B, T_char)
+            char_positions = torch.arange(T, device=token_ids.device).unsqueeze(0).expand(B, T)  # (B, T)
             first_pos.scatter_reduce_(1, token_ids, char_positions, reduce="min", include_self=True)
             top_first_positions = first_pos.gather(1, top_token_indices)  # (B, k_tokens)
+
             entropy_top_mask = torch.zeros_like(gt_boundaries, dtype=torch.bool)
-            valid = top_first_positions < T_char
+            valid = top_first_positions < T
             entropy_top_mask[batch_idx.expand_as(top_first_positions)[valid], top_first_positions[valid]] = True
+
+            gt_boundaries = gt_boundaries | entropy_top_mask
             reset_target = entropy_top_mask.float()
 
         # === 4. Compute auxiliary losses ===
@@ -111,7 +115,7 @@ class TkLM(nn.Module):
         snn_loss = self.snn_loss(self.snn_tokenizer.node.past_v, self.snn_tokenizer.I, gt_idx)
 
         # Total loss
-        aux_loss = (snn_loss + reset_loss) / 2.0
+        aux_loss = snn_loss / 2. + reset_loss
         total_loss = lm_loss + self.lambda_aux * aux_loss
 
         # Clean up SNN state
@@ -159,8 +163,12 @@ def prepare_model(model_args, adapter_args, num_labels, label_list, is_regressio
 
     # --- Load Tokenizer ---
     tokenizer = SNNTokenizer(
-        model_args.char_embed_dim, model_args.ann_hidden_dim, model_args.output_embed_dim, model_args.max_char_len
+        model_args.char_embed_dim, model_args.ann_hidden_dim, model_args.output_embed_dim,
+        model_args.max_char_len, model_args.entropy
     )
+    if model_args.snn_tokenizer_path:
+        snn_tokenizer_dict = torch.load(model_args.snn_tokenizer_path, map_location="cuda", weights_only=False)
+        tokenizer.load_state_dict(snn_tokenizer_dict)
 
     lm_tk = AutoTokenizer.from_pretrained(
         (model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path),
@@ -174,6 +182,11 @@ def prepare_model(model_args, adapter_args, num_labels, label_list, is_regressio
         config=config, cache_dir=model_args.cache_dir, revision=model_args.model_revision,
         use_auth_token=True if model_args.use_auth_token else None, ignore_mismatched_sizes=model_args.ignore_mismatched_sizes,
     )
+    for name, param in model.named_parameters():
+        if "lora" in name or "classifier" in name or "adapter" in name:
+            param.requires_grad = True
+        else:
+            param.requires_grad = False
 
     mlm_model = AutoModelForMaskedLM.from_pretrained(
         model_args.model_name_or_path, from_tf=bool(".ckpt" in model_args.model_name_or_path),
@@ -181,6 +194,8 @@ def prepare_model(model_args, adapter_args, num_labels, label_list, is_regressio
         use_auth_token=True if model_args.use_auth_token else None, ignore_mismatched_sizes=model_args.ignore_mismatched_sizes,
     )
     lm_head = mlm_model.lm_head
+    for param in lm_head.parameters():
+        param.requires_grad = False
 
     # --- Setup Adapters (LoRA/AdaLoRA) for Language Model ---
     peft_config = None
@@ -202,6 +217,10 @@ def prepare_model(model_args, adapter_args, num_labels, label_list, is_regressio
 
     # --- Build Tokenization and Language Model Integration ---
     tklm = TkLM(tokenizer, model, lm_head, lm_tk, model_args.entropy)
+    # print("Trainable parameters:")
+    # for name, param in tklm.named_parameters():
+    #     if param.requires_grad:
+    #         print(f"  {name}: {param.shape}")
 
     # --- Prepare compute_metrics function ---
     def compute_metrics(p):

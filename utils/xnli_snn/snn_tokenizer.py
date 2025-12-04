@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from typing import List, Optional, Tuple
+from spikingjelly.activation_based import base, neuron, functional, surrogate, layer
 from utils.xnli_snn.neurons import ConditionalLIFNode
 
 
@@ -10,8 +11,9 @@ class SNNTokenizer(nn.Module):
         char_embed_dim: int = 128,
         ann_hidden_dim: int = 256,
         output_embed_dim: int = 768,   # must match LLM hidden size
-        max_char_len: int = 512,       # max UTF-8 byte length
-        device: str = "cuda"
+        max_char_len: int = 256,       # max UTF-8 byte length
+        entropy: bool = True,
+        device: str = "cuda",
     ):
         super().__init__()
         self.char_embed_dim = char_embed_dim
@@ -19,23 +21,24 @@ class SNNTokenizer(nn.Module):
         self.output_embed_dim = output_embed_dim
         self.max_char_len = max_char_len
         self.device = device
+        self.entropy = entropy
 
         # === 1. Char Embedding (256 = full byte range) ===
         self.char_embedding = nn.Embedding(256, char_embed_dim, padding_idx=0)
 
         # === 2. Shared ANN Encoder (for boundary and reset prediction)===
         self.context_encoder = nn.Sequential(
-            nn.Linear(char_embed_dim, ann_hidden_dim),
-            nn.GELU(),
-            nn.LayerNorm(ann_hidden_dim),
-            # nn.Linear(ann_hidden_dim, ann_hidden_dim),
-            # nn.GELU(),
-            # nn.LayerNorm(ann_hidden_dim)
+            layer.Linear(char_embed_dim, ann_hidden_dim, step_mode='m'),
+            layer.BatchNorm1d(ann_hidden_dim),
+            neuron.IFNode(step_mode='m'),
+            layer.Linear(ann_hidden_dim, ann_hidden_dim, step_mode='m'),
+            layer.BatchNorm1d(ann_hidden_dim),
+            neuron.IFNode(step_mode='m'),
         )
 
         # === 3. Boundary & Reset Predictors (identical structure) ===
-        self.boundary_predictor = nn.Linear(ann_hidden_dim, 1)
-        self.reset_predictor = nn.Linear(ann_hidden_dim, 1)
+        self.boundary_predictor = layer.Linear(ann_hidden_dim, 1, step_mode='m')
+        self.reset_predictor = layer.Linear(ann_hidden_dim, 1, step_mode='m')
 
         # === 4. Conditional SNN Node (multi-step, reset-controlled) ===
         self.node = ConditionalLIFNode(step_mode='m', v_reset=0., tau=2.)
@@ -57,7 +60,7 @@ class SNNTokenizer(nn.Module):
     def forward(
         self,
         texts: List[str],
-        use_hard_boundaries: bool = False
+        use_hard_boundaries: bool = False,
     ) -> torch.Tensor:
         """
         Returns:
@@ -80,8 +83,11 @@ class SNNTokenizer(nn.Module):
         snn_input = boundary_logits.transpose(0, 1).unsqueeze(-1)      # (T, B, 1)
 
         # Reset mask: from reset_logits, (T, B, 1)
-        reset_probs = torch.sigmoid(reset_logits)
-        reset_mask = (reset_probs > 0.5).transpose(0, 1).unsqueeze(-1)  # (T, B, 1)
+        if self.entropy:
+            reset_probs = torch.sigmoid(reset_logits)
+            reset_mask = (reset_probs > 0.5).transpose(0, 1).unsqueeze(-1)  # (T, B, 1)
+        else:
+            reset_mask = None
 
         # Set reset mask and run SNN in multi-step mode
         self.node.set_reset_mask(reset_mask)

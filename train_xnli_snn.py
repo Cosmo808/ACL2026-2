@@ -35,7 +35,9 @@ if __name__ == "__main__":
     ###########################################################################
     model_name_or_path = "xlm-roberta-base"
     out_prefix = "E:/ACL2026-2/output_lora_peft/dynamic_tk_snn"
+    snn_tokenizer_path = "E:/ACL2026-2/utils/xnli_snn/snn_tokenizer.pt"
     method = "lora"
+    batchsize = 100
     max_len = 256
     dropout = 0.3
     rank = 128
@@ -43,7 +45,7 @@ if __name__ == "__main__":
     tokenization_type = "dynamic"
     lng = "en"
     alpha = 2 * rank
-    entropy = True
+    entropy = False
     entropyornot = "entropy" if entropy else "noentropy"
 
     today = datetime.date.today().strftime("%d%m%Y")
@@ -54,6 +56,7 @@ if __name__ == "__main__":
         tokenization_type=tokenization_type,
         max_char_len=max_len,
         entropy=entropy,
+        snn_tokenizer_path=snn_tokenizer_path,
     )
 
     data_args = DataTrainingArguments(
@@ -67,8 +70,8 @@ if __name__ == "__main__":
         do_train=True,
         do_eval=True,
         # do_predict=True,
-        per_device_train_batch_size=100,
-        per_device_eval_batch_size=100,
+        per_device_train_batch_size=batchsize,
+        per_device_eval_batch_size=batchsize,
         learning_rate=1e-4,
         num_train_epochs=15.0,
         evaluation_strategy="steps",
@@ -109,6 +112,9 @@ if __name__ == "__main__":
     print(f"Data Args: {data_args}")
 
     # Configure training arguments for dynamic tokenization
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+
     training_args.remove_unused_columns = False
     training_args.data_seed = training_args.seed
 
