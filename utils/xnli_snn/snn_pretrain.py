@@ -47,8 +47,8 @@ if __name__ == "__main__":
         model_args.max_char_len, model_args.entropy
     )
     snn_tokenizer.to(device)
-    snn_tokenizer_dict = torch.load(r"E:\ACL2026-2\utils\xnli_snn\snn_tokenizer.pt", weights_only=False, map_location=device)
-    snn_tokenizer.load_state_dict(snn_tokenizer_dict)
+    # snn_tokenizer_dict = torch.load(r"E:\ACL2026-2\utils\xnli_snn\snn_tokenizer_1block_epoch28.pt", weights_only=False, map_location=device)
+    # snn_tokenizer.load_state_dict(snn_tokenizer_dict)
 
     # Initialize XLM-R Tokenizer (Ground Truth)
     lm_tokenizer = AutoTokenizer.from_pretrained(
@@ -81,7 +81,7 @@ if __name__ == "__main__":
     for epoch in range(5):
         total_loss = 0.0
         batch_count = 0
-        for split in ['validation', 'test']:
+        for split in ['train', 'validation', 'test']:
             for batch in tqdm(dataloader_dict[split], desc=f"Epoch {epoch} - {split}"):
                 optimizer.zero_grad()
 
@@ -124,7 +124,7 @@ if __name__ == "__main__":
 
                 # --- Calculate SNN Loss ---
                 gt_idx = [torch.where(gt_boundaries[b])[0] for b in range(gt_boundaries.shape[0])]
-                gt_idx = [idx[1:] for idx in gt_idx]  # remove the first one, SNN cannot spike at first time point
+                gt_idx = [idx[1:] - 1 for idx in gt_idx]  # remove the first one; offset -1
                 snn_loss_value = snn_loss(snn_tokenizer.node.past_v, snn_tokenizer.I, gt_idx)
 
                 snn_loss_value.backward()

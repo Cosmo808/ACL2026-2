@@ -38,6 +38,7 @@ class ModelArguments:
     max_char_len: int = field(default=256)
     entropy: bool = field(default=False)
     snn_tokenizer_path: str = field(default=None)
+    snn_frozen: bool = field(default=False)
 
 
 @dataclass

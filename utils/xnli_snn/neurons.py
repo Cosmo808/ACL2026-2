@@ -77,25 +77,20 @@ class ConditionalLIFNode(neuron.LIFNode):
         else:
             spike_d = spike
 
+        self.v = self.jit_soft_reset(self.v, spike_d, self.v_threshold)
+
+        if self.reset_mask is not None:
+            # Get reset condition for CURRENT time step
+            assert self.current_step < self.reset_mask.shape[0], \
+                f"Step {self.current_step} >= T={self.reset_mask.shape[0]}"
+
+            # reset_mask: [T, B, 1] -> current: [B, 1]
+            current_reset = self.reset_mask[self.current_step]  # [B, 1]
+            reset_condition = current_reset & (spike_d > 0)
+            self.v = torch.where(reset_condition, torch.full_like(self.v, self.v_reset), self.v)
+            self.current_step += 1  # move to next step
+
         self.past_v.append(self.v)
-
-        if self.v_reset is None:
-            # soft reset (optional)
-            self.v = self.jit_soft_reset(self.v, spike_d, self.v_threshold)
-        else:
-            if self.reset_mask is not None:
-                # Get reset condition for CURRENT time step
-                assert self.current_step < self.reset_mask.shape[0], \
-                    f"Step {self.current_step} >= T={self.reset_mask.shape[0]}"
-
-                # reset_mask: [T, B, 1] -> current: [B, 1]
-                current_reset = self.reset_mask[self.current_step]  # [B, 1]
-                reset_condition = current_reset & (spike_d > 0)
-                self.v = torch.where(reset_condition, torch.full_like(self.v, self.v_reset), self.v)
-                self.current_step += 1  # move to next step
-            else:
-                # No reset at all
-                pass
 
     def reset(self):
         self.past_v = []
@@ -106,7 +101,7 @@ class ConditionalLIFNode(neuron.LIFNode):
 
 
 class MembraneLoss(torch.nn.Module):
-    def __init__(self, mse=torch.nn.MSELoss(), v_decay=1, i_decay=1, alpha=0., *args, **kwargs):
+    def __init__(self, v_decay=1., i_decay=0.5, alpha=0., *args, **kwargs):
         """
         :param mse: loss function
         :param v_decay: coefficient of v
@@ -114,7 +109,7 @@ class MembraneLoss(torch.nn.Module):
         :param alpha: weight of upper bound
         """
         super().__init__(*args, **kwargs)
-        self.mse = mse
+        self.mse = torch.nn.MSELoss()
         self.v_decay = v_decay
         self.i_decay = i_decay
         self.alpha_value = torch.nn.Parameter(torch.tensor(alpha))
@@ -122,15 +117,26 @@ class MembraneLoss(torch.nn.Module):
     def __call__(self, mem_seq, I, gt_idx, Vth=1.):
         mem_loss = 0.
         mem_seq = torch.stack(mem_seq)
-        B = mem_seq.shape[1]
+        B, T = mem_seq.shape[1], mem_seq.shape[0]
+
         for b in range(B):
             gt_i = gt_idx[b]
             mem_v = mem_seq[gt_i, b].squeeze(-1)
 
-            up_bound_target = (torch.tensor(Vth) * self.v_decay + self.i_decay * I[b, gt_i].detach().clamp(0)).clamp(min=Vth)
+            up_bound_target = (torch.tensor(Vth) * self.v_decay + self.i_decay * I[b, gt_i].detach().clamp(0)).clamp(min=Vth, max=2*Vth)
             low_bound_target = torch.tensor(Vth)
             target = self.alpha * up_bound_target + (1 - self.alpha) * low_bound_target
-            mem_loss = mem_loss + self.mse(mem_v, target)
+            mem_loss = mem_loss + self.mse(mem_v, up_bound_target)
+
+            # Non-target time steps: penalize only if mem > Vth
+            mask = torch.ones(T, dtype=torch.bool, device=mem_seq.device)
+            mask[gt_i] = False
+            mem_v_others = mem_seq[mask, b].squeeze(-1)
+            target = (self.i_decay * I[b, mask].detach()).clamp(min=0, max=Vth)
+            excess = F.relu(mem_v_others - target)
+            positive = excess > 0
+            if positive.any():
+                mem_loss += excess[positive].mean()
 
         return mem_loss / B
 

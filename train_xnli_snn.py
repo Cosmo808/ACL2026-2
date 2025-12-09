@@ -47,6 +47,7 @@ if __name__ == "__main__":
     alpha = 2 * rank
     entropy = False
     entropyornot = "entropy" if entropy else "noentropy"
+    snn_frozen = True
 
     today = datetime.date.today().strftime("%d%m%Y")
     output_dir = f"{out_prefix}/{tokenization_type}_{lng}_{method}_dropout_{dropout}_rank_{rank}_seed_{seed}_{today}_{entropyornot}"
@@ -57,6 +58,7 @@ if __name__ == "__main__":
         max_char_len=max_len,
         entropy=entropy,
         snn_tokenizer_path=snn_tokenizer_path,
+        snn_frozen=snn_frozen,
     )
 
     data_args = DataTrainingArguments(
@@ -74,8 +76,6 @@ if __name__ == "__main__":
         per_device_eval_batch_size=batchsize,
         learning_rate=1e-4,
         num_train_epochs=15.0,
-        evaluation_strategy="steps",
-        save_strategy="steps",
         save_steps=5000,
         eval_steps=5000,
         seed=seed,

@@ -27,21 +27,29 @@ class SNNTokenizer(nn.Module):
         self.char_embedding = nn.Embedding(256, char_embed_dim, padding_idx=0)
 
         # === 2. Shared ANN Encoder (for boundary and reset prediction)===
+        # self.context_encoder = nn.Sequential(
+        #     layer.Linear(char_embed_dim, ann_hidden_dim, step_mode='m'),
+        #     layer.BatchNorm1d(ann_hidden_dim),
+        #     neuron.IFNode(step_mode='m'),
+        #     # layer.Linear(ann_hidden_dim, ann_hidden_dim, step_mode='m'),
+        #     # layer.BatchNorm1d(ann_hidden_dim),
+        #     # neuron.IFNode(step_mode='m'),
+        # )
         self.context_encoder = nn.Sequential(
-            layer.Linear(char_embed_dim, ann_hidden_dim, step_mode='m'),
-            layer.BatchNorm1d(ann_hidden_dim),
-            neuron.IFNode(step_mode='m'),
-            layer.Linear(ann_hidden_dim, ann_hidden_dim, step_mode='m'),
-            layer.BatchNorm1d(ann_hidden_dim),
-            neuron.IFNode(step_mode='m'),
+            nn.Linear(char_embed_dim, ann_hidden_dim),
+            nn.GroupNorm(num_groups=16, num_channels=ann_hidden_dim),
+            nn.GELU(),
+            # nn.Linear(ann_hidden_dim, ann_hidden_dim),
+            # nn.GroupNorm(num_groups=16, num_channels=ann_hidden_dim),
+            # nn.GELU(),
         )
 
         # === 3. Boundary & Reset Predictors (identical structure) ===
-        self.boundary_predictor = layer.Linear(ann_hidden_dim, 1, step_mode='m')
-        self.reset_predictor = layer.Linear(ann_hidden_dim, 1, step_mode='m')
+        self.boundary_predictor = nn.Linear(ann_hidden_dim, 1)
+        self.reset_predictor = nn.Linear(ann_hidden_dim, 1)
 
         # === 4. Conditional SNN Node (multi-step, reset-controlled) ===
-        self.node = ConditionalLIFNode(step_mode='m', v_reset=0., tau=2.)
+        self.node = ConditionalLIFNode(step_mode='m', tau=2., v_reset=0.)
 
         # === 5. Projection to LLM space ===
         self.projection = nn.Sequential(
@@ -93,27 +101,23 @@ class SNNTokenizer(nn.Module):
         self.node.set_reset_mask(reset_mask)
         spikes = self.node(snn_input)                                 # (T, B, 1)
 
-        # === Step 5: Get boundaries===
+        # === Step 5: Get boundaries & Apply UTF-8 boundary mask===
+        boundary_logits = boundary_logits * boundary_mask + (-1e4) * (1 - boundary_mask)
         soft_boundaries = torch.sigmoid(boundary_logits)  # (B, T)
-        hard_boundaries = spikes.squeeze(-1).transpose(0, 1)  # (B, T)
 
-        # === Step 6: Apply UTF-8 boundary mask ===
-        soft_boundaries = soft_boundaries * boundary_mask + (-1e4) * (1 - boundary_mask)
+        hard_boundaries = spikes.squeeze(-1).transpose(0, 1)  # (B, T)
         hard_boundaries = hard_boundaries * boundary_mask
 
-        # === Step 7: Choose boundary type ===
+        # === Step 6: Choose boundary type ===
         if use_hard_boundaries:
             boundaries = hard_boundaries.float()
         else:
             boundaries = soft_boundaries
 
-        # Ensure first token always starts
-        boundaries[:, 0] = 1.0
-
-        # === Step 8: Soft grouping → token embeddings ===
+        # === Step 7: Soft grouping → token embeddings ===
         token_embs, token_ids = self._soft_group(hidden, boundaries)  # (B, L, ann_hidden_dim), (B, T)
 
-        # === Step 9: Project to LLM space ===
+        # === Step 8: Project to LLM space ===
         inputs_embeds = self.projection(token_embs)                   # (B, L, output_embed_dim)
 
         # Save for external loss (e.g., entropy loss on reset_logits)
@@ -135,7 +139,9 @@ class SNNTokenizer(nn.Module):
 
         # Cumulative sum to assign token IDs
         cum_bound = torch.cumsum(boundaries, dim=1)  # (B, T)
-        token_ids = (cum_bound - 1).long()           # (B, T), 0-indexed
+        token_ids = cum_bound.long()           # (B, T), 0-indexed
+        token_ids = torch.roll(token_ids, shifts=1, dims=1)
+        token_ids[:, 0] = 0
 
         # Max token count in batch
         K = token_ids.max().item() + 1

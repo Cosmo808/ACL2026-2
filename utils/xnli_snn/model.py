@@ -111,7 +111,7 @@ class TkLM(nn.Module):
 
         # SNN membrane loss
         gt_idx = [torch.where(gt_boundaries[b])[0] for b in range(gt_boundaries.shape[0])]
-        gt_idx = [idx[1:] for idx in gt_idx]  # remove the first one, SNN cannot spike at first time point
+        gt_idx = [idx[1:] - 1 for idx in gt_idx]  # remove the first one, SNN cannot spike at first time point
         snn_loss = self.snn_loss(self.snn_tokenizer.node.past_v, self.snn_tokenizer.I, gt_idx)
 
         # Total loss
@@ -169,6 +169,9 @@ def prepare_model(model_args, adapter_args, num_labels, label_list, is_regressio
     if model_args.snn_tokenizer_path:
         snn_tokenizer_dict = torch.load(model_args.snn_tokenizer_path, map_location="cuda", weights_only=False)
         tokenizer.load_state_dict(snn_tokenizer_dict)
+    if model_args.snn_frozen:
+        for param in tokenizer.parameters():
+            param.requires_grad = False
 
     lm_tk = AutoTokenizer.from_pretrained(
         (model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path),
@@ -217,10 +220,10 @@ def prepare_model(model_args, adapter_args, num_labels, label_list, is_regressio
 
     # --- Build Tokenization and Language Model Integration ---
     tklm = TkLM(tokenizer, model, lm_head, lm_tk, model_args.entropy)
-    # print("Trainable parameters:")
-    # for name, param in tklm.named_parameters():
-    #     if param.requires_grad:
-    #         print(f"  {name}: {param.shape}")
+    print("Trainable parameters:")
+    for name, param in tklm.named_parameters():
+        if param.requires_grad:
+            print(f"  {name}: {param.shape}")
 
     # --- Prepare compute_metrics function ---
     def compute_metrics(p):
