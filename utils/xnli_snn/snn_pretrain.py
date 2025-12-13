@@ -47,8 +47,8 @@ if __name__ == "__main__":
         model_args.max_char_len, model_args.entropy
     )
     snn_tokenizer.to(device)
-    snn_tokenizer_dict = torch.load(r"E:\ACL2026-2\utils\xnli_snn\snn_tokenizer_epoch6.pt", weights_only=False, map_location=device)
-    snn_tokenizer.load_state_dict(snn_tokenizer_dict)
+    # snn_tokenizer_dict = torch.load(r"E:\ACL2026-2\utils\xnli_snn\snn_tokenizer_epoch6.pt", weights_only=False, map_location=device)
+    # snn_tokenizer.load_state_dict(snn_tokenizer_dict)
 
     # Initialize XLM-R Tokenizer (Ground Truth)
     lm_tokenizer = AutoTokenizer.from_pretrained(
@@ -79,7 +79,7 @@ if __name__ == "__main__":
     snn_loss = MembraneLoss()
 
     # Training Loop
-    for epoch in range(10):
+    for epoch in range(5):
         total_losses = 0.0
         spike_acc, not_spike_acc = 0., 0.
         batch_count = 0

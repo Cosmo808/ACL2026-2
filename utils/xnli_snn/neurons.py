@@ -126,11 +126,10 @@ class MembraneLoss(torch.nn.Module):
             # --- Encourage to Spike ---
             gt_i = gt_idx[b]
             mem_v = mem_seq[gt_i, b].squeeze(-1)
-            up_bound_target = (torch.tensor(Vth) * self.v_decay + self.i_decay * I[b, gt_i].detach().clamp(0)).clamp(min=Vth)
+            up_bound_target = (torch.tensor(Vth) * self.v_decay + self.i_decay * I[b, gt_i].detach().clamp(0)).clamp(min=Vth, max=1.5*Vth) + 0.2
             # low_bound_target = torch.tensor(Vth)
             # target = self.alpha * up_bound_target + (1 - self.alpha) * low_bound_target
-            # mse_loss = self.mse(mem_v[mem_v < 1], up_bound_target[mem_v < 1])
-            mse_loss = self.mse(mem_v, up_bound_target)
+            mse_loss = self.mse(mem_v[mem_v < 1], up_bound_target[mem_v < 1])
             mse_loss = 0. if torch.isnan(mse_loss) else mse_loss
             mem_losses = mem_losses + mse_loss
 
