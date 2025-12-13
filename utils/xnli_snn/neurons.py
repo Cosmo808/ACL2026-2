@@ -54,7 +54,7 @@ class LIFNode(neuron.LIFNode):
             self._memories[key] = copy.deepcopy(self._memories_rv[key])
 
 
-class ConditionalLIFNode(neuron.LIFNode):
+class ConditionalLIFNode(neuron.IFNode):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.past_v = []
@@ -101,7 +101,7 @@ class ConditionalLIFNode(neuron.LIFNode):
 
 
 class MembraneLoss(torch.nn.Module):
-    def __init__(self, v_decay=1., i_decay=0.5, alpha=0., *args, **kwargs):
+    def __init__(self, v_decay=1., i_decay=1., alpha=0., *args, **kwargs):
         """
         :param mse: loss function
         :param v_decay: coefficient of v
@@ -115,30 +115,41 @@ class MembraneLoss(torch.nn.Module):
         self.alpha_value = torch.nn.Parameter(torch.tensor(alpha))
 
     def __call__(self, mem_seq, I, gt_idx, Vth=1.):
-        mem_loss = 0.
+        mem_losses = 0.
         mem_seq = torch.stack(mem_seq)
         B, T = mem_seq.shape[1], mem_seq.shape[0]
 
+        spike_num, not_spike_num = 0, 0
+        spike_total, not_spike_total = 0, 0
+
         for b in range(B):
+            # --- Encourage to Spike ---
             gt_i = gt_idx[b]
             mem_v = mem_seq[gt_i, b].squeeze(-1)
+            up_bound_target = (torch.tensor(Vth) * self.v_decay + self.i_decay * I[b, gt_i].detach().clamp(0)).clamp(min=Vth)
+            # low_bound_target = torch.tensor(Vth)
+            # target = self.alpha * up_bound_target + (1 - self.alpha) * low_bound_target
+            # mse_loss = self.mse(mem_v[mem_v < 1], up_bound_target[mem_v < 1])
+            mse_loss = self.mse(mem_v, up_bound_target)
+            mse_loss = 0. if torch.isnan(mse_loss) else mse_loss
+            mem_losses = mem_losses + mse_loss
 
-            up_bound_target = (torch.tensor(Vth) * self.v_decay + self.i_decay * I[b, gt_i].detach().clamp(0)).clamp(min=Vth, max=2*Vth)
-            low_bound_target = torch.tensor(Vth)
-            target = self.alpha * up_bound_target + (1 - self.alpha) * low_bound_target
-            mem_loss = mem_loss + self.mse(mem_v, up_bound_target)
-
-            # Non-target time steps: penalize only if mem > Vth
+            # --- Discourage to Spike ---
             mask = torch.ones(T, dtype=torch.bool, device=mem_seq.device)
             mask[gt_i] = False
             mem_v_others = mem_seq[mask, b].squeeze(-1)
-            target = (self.i_decay * I[b, mask].detach()).clamp(min=0, max=Vth)
-            excess = F.relu(mem_v_others - target)
-            positive = excess > 0
-            if positive.any():
-                mem_loss += excess[positive].mean()
+            target = (self.i_decay * I[b, mask].detach().clamp(min=0, max=Vth)) - 0.2
+            mse_loss = self.mse(mem_v_others[mem_v_others >= 1], target[mem_v_others >= 1])
+            mse_loss = 0. if torch.isnan(mse_loss) else mse_loss
+            mem_losses = mem_losses + mse_loss * 0.5
 
-        return mem_loss / B
+            # --- Record Accuracy ---
+            spike_num += (mem_v >= 1).sum().item()
+            spike_total += len(mem_v)
+            not_spike_num += (mem_v_others < 1).sum().item()
+            not_spike_total += len(mem_v_others)
+
+        return mem_losses / B, {'spike': spike_num / spike_total, 'not_spike': not_spike_num / not_spike_total}
 
     @property
     def alpha(self):

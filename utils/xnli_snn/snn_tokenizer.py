@@ -27,29 +27,29 @@ class SNNTokenizer(nn.Module):
         self.char_embedding = nn.Embedding(256, char_embed_dim, padding_idx=0)
 
         # === 2. Shared ANN Encoder (for boundary and reset prediction)===
-        # self.context_encoder = nn.Sequential(
-        #     layer.Linear(char_embed_dim, ann_hidden_dim, step_mode='m'),
-        #     layer.BatchNorm1d(ann_hidden_dim),
-        #     neuron.IFNode(step_mode='m'),
-        #     # layer.Linear(ann_hidden_dim, ann_hidden_dim, step_mode='m'),
-        #     # layer.BatchNorm1d(ann_hidden_dim),
-        #     # neuron.IFNode(step_mode='m'),
-        # )
         self.context_encoder = nn.Sequential(
-            nn.Linear(char_embed_dim, ann_hidden_dim),
-            nn.GroupNorm(num_groups=16, num_channels=ann_hidden_dim),
-            nn.GELU(),
-            # nn.Linear(ann_hidden_dim, ann_hidden_dim),
-            # nn.GroupNorm(num_groups=16, num_channels=ann_hidden_dim),
-            # nn.GELU(),
+            layer.Linear(char_embed_dim, ann_hidden_dim, step_mode='m'),
+            layer.GroupNorm(num_groups=16, num_channels=ann_hidden_dim),
+            neuron.IFNode(step_mode='m'),
+            layer.Linear(ann_hidden_dim, ann_hidden_dim, step_mode='m'),
+            layer.GroupNorm(num_groups=16, num_channels=ann_hidden_dim),
+            neuron.IFNode(step_mode='m'),
         )
+        # self.context_encoder = nn.Sequential(
+        #     nn.Linear(char_embed_dim, ann_hidden_dim),
+        #     nn.GroupNorm(num_groups=16, num_channels=ann_hidden_dim),
+        #     nn.GELU(),
+        # nn.Linear(ann_hidden_dim, ann_hidden_dim),
+        # nn.GroupNorm(num_groups=16, num_channels=ann_hidden_dim),
+        # nn.GELU(),
+        # )
 
         # === 3. Boundary & Reset Predictors (identical structure) ===
-        self.boundary_predictor = nn.Linear(ann_hidden_dim, 1)
-        self.reset_predictor = nn.Linear(ann_hidden_dim, 1)
+        self.boundary_predictor = layer.Linear(ann_hidden_dim, 1, step_mode='m')
+        self.reset_predictor = layer.Linear(ann_hidden_dim, 1, step_mode='m')
 
-        # === 4. Conditional SNN Node (multi-step, reset-controlled) ===
-        self.node = ConditionalLIFNode(step_mode='m', tau=2., v_reset=0.)
+        # === 4. Conditional SNN Node (multi-step) ===
+        self.node = ConditionalLIFNode(step_mode='m')
 
         # === 5. Projection to LLM space ===
         self.projection = nn.Sequential(

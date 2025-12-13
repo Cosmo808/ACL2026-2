@@ -47,8 +47,8 @@ if __name__ == "__main__":
         model_args.max_char_len, model_args.entropy
     )
     snn_tokenizer.to(device)
-    # snn_tokenizer_dict = torch.load(r"E:\ACL2026-2\utils\xnli_snn\snn_tokenizer_1block_epoch28.pt", weights_only=False, map_location=device)
-    # snn_tokenizer.load_state_dict(snn_tokenizer_dict)
+    snn_tokenizer_dict = torch.load(r"E:\ACL2026-2\utils\xnli_snn\snn_tokenizer_epoch6.pt", weights_only=False, map_location=device)
+    snn_tokenizer.load_state_dict(snn_tokenizer_dict)
 
     # Initialize XLM-R Tokenizer (Ground Truth)
     lm_tokenizer = AutoTokenizer.from_pretrained(
@@ -73,16 +73,18 @@ if __name__ == "__main__":
             )
 
     # Optimizer
-    optimizer = optim.Adam(snn_tokenizer.parameters(), lr=1e-4)
+    optimizer = optim.Adam(snn_tokenizer.parameters(), lr=5e-4)
     snn_tokenizer.train()
+    binary_loss = torch.nn.BCELoss()
     snn_loss = MembraneLoss()
 
     # Training Loop
-    for epoch in range(5):
-        total_loss = 0.0
+    for epoch in range(10):
+        total_losses = 0.0
+        spike_acc, not_spike_acc = 0., 0.
         batch_count = 0
         for split in ['train', 'validation', 'test']:
-            for batch in tqdm(dataloader_dict[split], desc=f"Epoch {epoch} - {split}"):
+            for batch in tqdm(dataloader_dict[split], desc=f"Epoch {epoch}-{split}"):
                 optimizer.zero_grad()
 
                 premise = batch['premise'] if isinstance(batch['premise'], list) else [batch['premise']]
@@ -125,20 +127,28 @@ if __name__ == "__main__":
                 # --- Calculate SNN Loss ---
                 gt_idx = [torch.where(gt_boundaries[b])[0] for b in range(gt_boundaries.shape[0])]
                 gt_idx = [idx[1:] - 1 for idx in gt_idx]  # remove the first one; offset -1
-                snn_loss_value = snn_loss(snn_tokenizer.node.past_v, snn_tokenizer.I, gt_idx)
+                snn_loss_value, acc = snn_loss(snn_tokenizer.node.past_v, snn_tokenizer.I, gt_idx)
 
-                snn_loss_value.backward()
+                # --- BP ---
+                total_loss = snn_loss_value
+                total_loss.backward()
                 optimizer.step()
 
-                total_loss += snn_loss_value.item()
+                total_losses += total_loss.item()
+                spike_acc += acc['spike']
+                not_spike_acc += acc['not_spike']
                 batch_count += 1
+                if batch_count % 100 == 0:
+                    print(f"Acc: {acc['spike']:.4f} / {acc['not_spike']:.4f}")
 
                 # Clean up SNN state
                 functional.reset_net(snn_tokenizer)
                 snn_tokenizer.I = []
 
-        avg_loss = total_loss / batch_count
-        print(f"\nEpoch {epoch}, Average Loss: {avg_loss:.6f}")
+        avg_loss = total_losses / batch_count
+        avg_s_acc = spike_acc / batch_count
+        avg_ns_acc = not_spike_acc / batch_count
+        print(f"\nEpoch {epoch}, Average Loss: {avg_loss:.6f}, Spike Acc: {avg_s_acc:.4f}, Not Spike Acc: {avg_ns_acc:.4f}")
 
         # Save the trained SNN Tokenizer
         save_file = rf"E:\ACL2026-2\utils\xnli_snn\snn_tokenizer_epoch{epoch}.pt"
