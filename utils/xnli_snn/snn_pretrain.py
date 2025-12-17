@@ -88,10 +88,10 @@ if __name__ == "__main__":
 
                 # Prepare input texts for SNN Tokenizer
                 input_texts = [p + ' ' + h for p, h in zip(premise, hypothesis)]
-                input_embs = torch.stack([vocab.convert_to_tensor(t) for t in input_texts]).to(device)
+                char_embs = torch.stack([vocab.convert_to_tensor(t) for t in input_texts]).to(device)
 
                 # Run SNN Tokenizer
-                inputs_embeds = snn_tokenizer(input_embs, use_hard_boundaries=False)
+                inputs_embeds = snn_tokenizer(char_embs, use_hard_boundaries=False)
 
                 # --- Calculate Ground Truth Boundaries using XLM-R Tokenizer ---
                 gt_boundaries_list = []

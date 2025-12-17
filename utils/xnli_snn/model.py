@@ -32,39 +32,32 @@ class TkLM(nn.Module):
         # === 1. Tokenization and LM Inference ===
         assert premise is not None and hypothesis is not None
         self.snn_tokenizer.node.training = True
-        input_texts = ["<s>" + p + "</s>" + h + "</s>" for p, h in zip(premise, hypothesis)]
+        input_texts = [p + ' ' + h for p, h in zip(premise, hypothesis)]
+        char_embs = torch.stack([self.vocab.convert_to_tensor(t) for t in input_texts]).to('cuda')
+
         use_hard_boundaries = False if self.training else True
-        inputs_embeds = self.snn_tokenizer(input_texts, use_hard_boundaries=use_hard_boundaries)   # (B, L)
+        inputs_embeds = self.snn_tokenizer(char_embs, use_hard_boundaries=use_hard_boundaries)   # (B, L)
         outputs = self.lm(inputs_embeds=inputs_embeds, labels=labels, **kwargs)
         lm_loss = outputs.loss  # XLM-R classification loss
 
         # === 2. Get token boundaries from XLM-R tokenizer ===
         # Tokenize with original XLM-R tokenizer to get GT boundaries
-        gt_boundaries = []
+        gt_boundaries_list = []
         for text in input_texts:
-            tokens = self.lm_tk.tokenize(text)
-            char_len = len(text.encode('utf-8'))
-            boundary = torch.zeros(char_len, dtype=torch.long)
-            pos = 0
-            for token in tokens:
-                token_str = token[1:] if token.startswith("▁") else token
-                try:
-                    token_bytes = token_str.encode('utf-8')
-                except UnicodeEncodeError:
-                    token_bytes = b''
-                if len(token_bytes) == 0:
-                    continue
-                if pos < char_len:
-                    boundary[pos] = 1
-                pos += len(token_bytes)
+            token_output = self.lm_tk(text, return_offsets_mapping=True, add_special_tokens=False)
+            offset_mapping = token_output['offset_mapping']
+            boundary = torch.zeros(len(text), dtype=torch.long)
+            for offset in offset_mapping[1:]:
+                boundary[offset[0]] = 1
 
-            if char_len < self.snn_tokenizer.max_char_len:
-                boundary_pad = torch.zeros(self.snn_tokenizer.max_char_len - char_len, dtype=torch.bool)
+            max_char_len = self.vocab.max_len
+            if len(text) < max_char_len:
+                boundary_pad = torch.zeros(max_char_len - len(text), dtype=torch.long)
                 boundary = torch.cat([boundary, boundary_pad])
             else:
-                boundary = boundary[:self.snn_tokenizer.max_char_len]
-            gt_boundaries.append(boundary)
-        gt_boundaries = torch.stack(gt_boundaries).to(inputs_embeds.device)  # (B, T)
+                boundary = boundary[:max_char_len]
+            gt_boundaries_list.append(boundary)
+        gt_boundaries = torch.stack(gt_boundaries_list).to(inputs_embeds.device)
 
         # === 3. Top 20% high-entropy tokens ===
         reset_target = None
