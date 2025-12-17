@@ -11,12 +11,12 @@ Public methods:
 import pickle
 from collections import Counter, defaultdict
 from functools import lru_cache
-from typing import Dict, Tuple, List, Set, Any
+from typing import Dict, Tuple, List, Any
 
 from datasets.formatting.formatting import LazyBatch
-from utils.tokenizations.tokenizers_utils import pretokenize, tokenize
+from utils.xnli.tokenizations.tokenizers_utils import tokenize
 from tokenizers import pre_tokenizers
-from utils.zett.utils import CHARS_TO_BYTES
+from utils.xnli.zett.utils import CHARS_TO_BYTES
 
 class Dynamic_BPE:
     """
@@ -104,7 +104,6 @@ class Dynamic_BPE:
         Analyze the distribution of merges to average sequence lengths for a dataset batch.
         Populates self.merges2seqLen.
         """
-        import copy
         _, batch_tokens, _, _ = self.tokenize_base_case(
             batch_examples=batch_examples,
             mlm=False,

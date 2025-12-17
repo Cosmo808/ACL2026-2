@@ -38,7 +38,7 @@ if __name__ == "__main__":
     snn_tokenizer_path = "E:/ACL2026-2/utils/xnli_snn/snn_tokenizer.pt"
     method = "lora"
     batchsize = 100
-    max_len = 256
+    max_len = 128
     dropout = 0.3
     rank = 128
     seed = 42
@@ -147,23 +147,17 @@ if __name__ == "__main__":
     ###########################################################################
     # Load data
     ###########################################################################
-    raw_datasets, is_regression, label_list, num_labels, train_dataset, eval_dataset, predict_dataset = load_raw_datasets(
-        data_args, training_args, model_args
-    )
+    raw_datasets, is_regression, label_list, num_labels, vocab = load_raw_datasets(data_args, model_args)
 
     ###########################################################################
     # Prepare the model
     ###########################################################################
-    model, compute_metrics = prepare_model(
-        model_args, adapter_args, num_labels, label_list, is_regression, data_args
-    )
+    model, compute_metrics = prepare_model(model_args, adapter_args, num_labels, label_list, vocab, data_args)
 
     ###########################################################################
     # Train and Evaluate
     ###########################################################################
-    trainer = prepare_trainer(
-        model, training_args, raw_datasets, compute_metrics, model_args, eval_dataset
-    )
+    trainer = prepare_trainer(model, training_args, raw_datasets, compute_metrics)
 
     # Training
     if training_args.do_train:
@@ -191,21 +185,20 @@ if __name__ == "__main__":
     # Evaluation
     if training_args.do_eval:
         logger.info("\n*** Evaluate ***")
-        tasks = [data_args.task_name]
-        eval_datasets = [eval_dataset]
+        task = data_args.task_name
+        eval_dataset = raw_datasets["vaidation"]
 
-        for eval_dataset, task in zip(eval_datasets, tasks):
-            metrics = trainer.evaluate(eval_dataset=eval_dataset)
-            max_eval_samples = (
-                data_args.max_eval_samples
-                if data_args.max_eval_samples is not None
-                else len(eval_dataset)
-            )
-            metrics["eval_samples"] = min(max_eval_samples, len(eval_dataset))
-            if task == "mnli-mm":
-                metrics = {k + "_mm": v for k, v in metrics.items()}
-            trainer.log_metrics("eval", metrics)
-            trainer.save_metrics("eval", metrics)
+        metrics = trainer.evaluate(eval_dataset=eval_dataset)
+        max_eval_samples = (
+            data_args.max_eval_samples
+            if data_args.max_eval_samples is not None
+            else len(eval_dataset)
+        )
+        metrics["eval_samples"] = min(max_eval_samples, len(eval_dataset))
+        if task == "mnli-mm":
+            metrics = {k + "_mm": v for k, v in metrics.items()}
+        trainer.log_metrics("eval", metrics)
+        trainer.save_metrics("eval", metrics)
 
     # Prediction
     if training_args.do_predict:
@@ -213,9 +206,7 @@ if __name__ == "__main__":
         # Loop to handle MNLI double evaluation (matched, mis-matched)
         tasks = [data_args.task_name]
         # Prepare predict_dataset here in main.py, as it was in the original script
-        predict_dataset = raw_datasets[
-            "test_matched" if data_args.task_name == "mnli" else "test"
-        ]
+        predict_dataset = raw_datasets[ "test_matched" if data_args.task_name == "mnli" else "test"]
         if data_args.max_predict_samples is not None:
             max_predict_samples = min(
                 len(predict_dataset), data_args.max_predict_samples

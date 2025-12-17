@@ -2,13 +2,11 @@ import logging
 import evaluate
 import numpy as np
 import torch
-from transformers import AutoConfig, AutoModelForSequenceClassification, AutoTokenizer, PretrainedConfig, AutoModel
-from peft import AdaLoraConfig, LoraConfig, PeftConfig, PeftModel, TaskType
-from utils.zett.tokenizer_converters import convert_to_byte_level
-from utils.tokenizations.tokenization_utils import DatasetEncoder
-from utils.tokenizations.hypernet_cache import LRU_Cache
-from utils.xnli.trainer import DynamicDataCollator
-
+from transformers import AutoConfig, AutoModelForSequenceClassification, AutoTokenizer, AutoModel
+from peft import LoraConfig, TaskType
+from utils.xnli.zett.tokenizer_converters import convert_to_byte_level
+from utils.xnli.tokenizations.tokenization_utils import DatasetEncoder
+from utils.xnli.tokenizations.hypernet_cache import LRU_Cache
 
 logger = logging.getLogger(__name__)
 

@@ -15,13 +15,14 @@ logger = logging.getLogger(__name__)
 
 
 class TkLM(nn.Module):
-    def __init__(self, snn_tokenizer, lm, lm_head, lm_tk, entropy: bool):
+    def __init__(self, snn_tokenizer, lm, lm_head, lm_tk, vocab, entropy: bool):
         super().__init__()
         self.snn_tokenizer = snn_tokenizer
         self.lm = lm
         self.lm_head = lm_head
         self.lm_tk = lm_tk
         self.lambda_aux = 1.
+        self.vocab = vocab
         self.entropy = entropy
 
         self.bce_loss = nn.BCEWithLogitsLoss()
@@ -152,7 +153,7 @@ class TkLM(nn.Module):
         return token_entropy
 
 
-def prepare_model(model_args, adapter_args, num_labels, label_list, is_regression, data_args):
+def prepare_model(model_args, adapter_args, num_labels, label_list, vocab, data_args):
     """Prepares the model, tokenizer, data_collator, DatasetEncoder, and compute_metrics function for dynamic tokenization."""
     # --- Load Config ---
     config = AutoConfig.from_pretrained(
@@ -162,10 +163,7 @@ def prepare_model(model_args, adapter_args, num_labels, label_list, is_regressio
     )
 
     # --- Load Tokenizer ---
-    tokenizer = SNNTokenizer(
-        model_args.char_embed_dim, model_args.ann_hidden_dim, model_args.output_embed_dim,
-        model_args.max_char_len, model_args.entropy
-    )
+    tokenizer = SNNTokenizer(len(vocab), model_args.char_embed_dim, model_args.output_embed_dim, model_args.entropy)
     if model_args.snn_tokenizer_path:
         snn_tokenizer_dict = torch.load(model_args.snn_tokenizer_path, map_location="cuda", weights_only=False)
         tokenizer.load_state_dict(snn_tokenizer_dict)
@@ -219,7 +217,7 @@ def prepare_model(model_args, adapter_args, num_labels, label_list, is_regressio
     model.config.id2label = {id: label for label, id in config.label2id.items()}
 
     # --- Build Tokenization and Language Model Integration ---
-    tklm = TkLM(tokenizer, model, lm_head, lm_tk, model_args.entropy)
+    tklm = TkLM(tokenizer, model, lm_head, lm_tk, vocab, model_args.entropy)
     print("Trainable parameters:")
     for name, param in tklm.named_parameters():
         if param.requires_grad:

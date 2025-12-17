@@ -9,6 +9,7 @@ from transformers import AutoTokenizer
 from spikingjelly.activation_based import functional
 
 from utils.xnli_snn.neurons import MembraneLoss
+from utils.xnli_snn.dataloader import load_raw_datasets
 from utils.xnli_snn.snn_tokenizer import SNNTokenizer
 from utils.xnli_snn.arguments import ModelArguments, DataTrainingArguments
 
@@ -32,22 +33,31 @@ if __name__ == "__main__":
     setup_seed(42)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    max_len = 128
     model_args = ModelArguments(
+        max_char_len=max_len,
         entropy=False
     )
     data_args = DataTrainingArguments(
         dataset_name="xnli",
         dataset_config_name="en",
-        max_seq_length=256,
+        max_seq_length=max_len,
     )
 
+    # Load dataset
+    raw_datasets, _, _, _, vocab = load_raw_datasets(data_args, model_args)
+    dataloader_dict = {}
+    for split in ['train', 'validation', 'test']:
+        if split in raw_datasets:
+            dataloader_dict[split] = DataLoader(
+                raw_datasets[split],
+                batch_size=128,
+            )
+
     # Initialize SNN Tokenizer
-    snn_tokenizer = SNNTokenizer(
-        model_args.char_embed_dim, model_args.ann_hidden_dim, model_args.output_embed_dim,
-        model_args.max_char_len, model_args.entropy
-    )
+    snn_tokenizer = SNNTokenizer(len(vocab), model_args.char_embed_dim, model_args.output_embed_dim, model_args.entropy)
     snn_tokenizer.to(device)
-    # snn_tokenizer_dict = torch.load(r"E:\ACL2026-2\utils\xnli_snn\snn_tokenizer_epoch6.pt", weights_only=False, map_location=device)
+    # snn_tokenizer_dict = torch.load(r"E:\ACL2026-2\utils\xnli_snn\snn_tokenizer.pt", weights_only=False, map_location=device)
     # snn_tokenizer.load_state_dict(snn_tokenizer_dict)
 
     # Initialize XLM-R Tokenizer (Ground Truth)
@@ -57,23 +67,9 @@ if __name__ == "__main__":
         revision=model_args.model_revision, use_auth_token=True if model_args.use_auth_token else None,
     )
 
-    # Load dataset
-    raw_datasets = load_dataset(
-        data_args.dataset_name,
-        data_args.dataset_config_name,
-        cache_dir=model_args.cache_dir,
-        use_auth_token=True if model_args.use_auth_token else None,
-    )
-    dataloader_dict = {}
-    for split in ['train', 'validation', 'test']:
-        if split in raw_datasets:
-            dataloader_dict[split] = DataLoader(
-                raw_datasets[split],
-                batch_size=128,
-            )
-
     # Optimizer
     optimizer = optim.Adam(snn_tokenizer.parameters(), lr=5e-4)
+    scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=0.90)
     snn_tokenizer.train()
     binary_loss = torch.nn.BCELoss()
     snn_loss = MembraneLoss()
@@ -91,33 +87,24 @@ if __name__ == "__main__":
                 hypothesis = batch['hypothesis'] if isinstance(batch['hypothesis'], list) else [batch['hypothesis']]
 
                 # Prepare input texts for SNN Tokenizer
-                input_texts = ["<s>" + p + "</s>" + h + "</s>" for p, h in zip(premise, hypothesis)]
+                input_texts = [p + ' ' + h for p, h in zip(premise, hypothesis)]
+                input_embs = torch.stack([vocab.convert_to_tensor(t) for t in input_texts]).to(device)
 
                 # Run SNN Tokenizer
-                inputs_embeds = snn_tokenizer(input_texts, use_hard_boundaries=False)
+                inputs_embeds = snn_tokenizer(input_embs, use_hard_boundaries=False)
 
                 # --- Calculate Ground Truth Boundaries using XLM-R Tokenizer ---
                 gt_boundaries_list = []
                 for text in input_texts:
-                    tokens = lm_tokenizer.tokenize(text)
-                    char_len = len(text.encode('utf-8'))
-                    boundary = torch.zeros(char_len, dtype=torch.long)
-                    pos = 0
-                    for token in tokens:
-                        token_str = token[1:] if token.startswith("▁") else token
-                        try:
-                            token_bytes = token_str.encode('utf-8')
-                        except UnicodeEncodeError:
-                            continue
-                        if len(token_bytes) == 0:
-                            continue
-                        if pos < char_len:
-                            boundary[pos] = 1
-                        pos += len(token_bytes)
+                    token_output = lm_tokenizer(text, return_offsets_mapping=True, add_special_tokens=False)
+                    offset_mapping = token_output['offset_mapping']
+                    boundary = torch.zeros(len(text), dtype=torch.long)
+                    for offset in offset_mapping[1:]:
+                        boundary[offset[0]] = 1
 
-                    max_char_len = snn_tokenizer.max_char_len
-                    if char_len < max_char_len:
-                        boundary_pad = torch.zeros(max_char_len - char_len, dtype=torch.long)
+                    max_char_len = vocab.max_len
+                    if len(text) < max_char_len:
+                        boundary_pad = torch.zeros(max_char_len - len(text), dtype=torch.long)
                         boundary = torch.cat([boundary, boundary_pad])
                     else:
                         boundary = boundary[:max_char_len]
@@ -145,12 +132,13 @@ if __name__ == "__main__":
                 functional.reset_net(snn_tokenizer)
                 snn_tokenizer.I = []
 
+        scheduler.step()
         avg_loss = total_losses / batch_count
         avg_s_acc = spike_acc / batch_count
         avg_ns_acc = not_spike_acc / batch_count
         print(f"\nEpoch {epoch}, Average Loss: {avg_loss:.6f}, Spike Acc: {avg_s_acc:.4f}, Not Spike Acc: {avg_ns_acc:.4f}")
 
         # Save the trained SNN Tokenizer
-        save_file = rf"E:\ACL2026-2\utils\xnli_snn\snn_tokenizer_epoch{epoch}.pt"
-        torch.save(snn_tokenizer.state_dict(), save_file)
-        print(f"Model saved to {save_file}")
+    save_file = rf"E:\ACL2026-2\utils\xnli_snn\snn_tokenizer.pt"
+    torch.save(snn_tokenizer.state_dict(), save_file)
+    print(f"Model saved to {save_file}")

@@ -9,7 +9,6 @@ Main class:
 """
 
 import time
-import random
 import numpy as np
 import torch
 from typing import Dict, Tuple, List, Set, Any
@@ -17,10 +16,10 @@ from tqdm import tqdm
 
 from datasets import Dataset
 from datasets.formatting.formatting import LazyBatch
-from utils.tokenizations.hypernet_cache import LRU_Cache
-from utils.tokenizations.dynamic_bpe import Dynamic_BPE
-from utils.tokenizations.tokenizers_utils import tokenize, pretokenize
-from utils.zett.utils import get_surface_form_matrix
+from utils.xnli.tokenizations.hypernet_cache import LRU_Cache
+from utils.xnli.tokenizations.dynamic_bpe import Dynamic_BPE
+from utils.xnli.tokenizations.tokenizers_utils import tokenize, pretokenize
+from utils.xnli.zett.utils import get_surface_form_matrix
 
 
 class DatasetEncoder:

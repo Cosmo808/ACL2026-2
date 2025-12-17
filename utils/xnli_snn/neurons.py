@@ -77,7 +77,9 @@ class ConditionalLIFNode(neuron.IFNode):
         else:
             spike_d = spike
 
-        self.v = self.jit_soft_reset(self.v, spike_d, self.v_threshold)
+        self.past_v.append(self.v)
+
+        self.v = self.jit_soft_reset(self.v, spike_d, 0.8*self.v_threshold)
 
         if self.reset_mask is not None:
             # Get reset condition for CURRENT time step
@@ -87,10 +89,8 @@ class ConditionalLIFNode(neuron.IFNode):
             # reset_mask: [T, B, 1] -> current: [B, 1]
             current_reset = self.reset_mask[self.current_step]  # [B, 1]
             reset_condition = current_reset & (spike_d > 0)
-            self.v = torch.where(reset_condition, torch.full_like(self.v, self.v_reset), self.v)
+            self.v = self.jit_hard_reset(self.v, reset_condition, self.v_reset)
             self.current_step += 1  # move to next step
-
-        self.past_v.append(self.v)
 
     def reset(self):
         self.past_v = []
@@ -101,7 +101,7 @@ class ConditionalLIFNode(neuron.IFNode):
 
 
 class MembraneLoss(torch.nn.Module):
-    def __init__(self, v_decay=1., i_decay=1., alpha=0., *args, **kwargs):
+    def __init__(self, v_decay=1., i_decay=1., alpha=0., beta=0., *args, **kwargs):
         """
         :param mse: loss function
         :param v_decay: coefficient of v
@@ -113,6 +113,7 @@ class MembraneLoss(torch.nn.Module):
         self.v_decay = v_decay
         self.i_decay = i_decay
         self.alpha_value = torch.nn.Parameter(torch.tensor(alpha))
+        self.beta_value = torch.nn.Parameter(torch.tensor(beta))
 
     def __call__(self, mem_seq, I, gt_idx, Vth=1.):
         mem_losses = 0.
@@ -126,21 +127,23 @@ class MembraneLoss(torch.nn.Module):
             # --- Encourage to Spike ---
             gt_i = gt_idx[b]
             mem_v = mem_seq[gt_i, b].squeeze(-1)
-            up_bound_target = (torch.tensor(Vth) * self.v_decay + self.i_decay * I[b, gt_i].detach().clamp(0)).clamp(min=Vth, max=1.5*Vth) + 0.2
-            # low_bound_target = torch.tensor(Vth)
-            # target = self.alpha * up_bound_target + (1 - self.alpha) * low_bound_target
-            mse_loss = self.mse(mem_v[mem_v < 1], up_bound_target[mem_v < 1])
-            mse_loss = 0. if torch.isnan(mse_loss) else mse_loss
+            up_bound_target = (torch.tensor(Vth) * self.v_decay + self.i_decay * I[b, gt_i].detach().clamp(0))                                                                  .clamp(min=1.2*Vth, max=2*Vth)
+            low_bound_target = torch.tensor(Vth)
+            target = self.alpha * up_bound_target + (1 - self.alpha) * low_bound_target
+            error_mask = mem_v < Vth
+            mse_loss = self.mse(mem_v * error_mask, target * error_mask)
             mem_losses = mem_losses + mse_loss
 
             # --- Discourage to Spike ---
             mask = torch.ones(T, dtype=torch.bool, device=mem_seq.device)
             mask[gt_i] = False
             mem_v_others = mem_seq[mask, b].squeeze(-1)
-            target = (self.i_decay * I[b, mask].detach().clamp(min=0, max=Vth)) - 0.2
-            mse_loss = self.mse(mem_v_others[mem_v_others >= 1], target[mem_v_others >= 1])
-            mse_loss = 0. if torch.isnan(mse_loss) else mse_loss
-            mem_losses = mem_losses + mse_loss * 0.5
+            up_bound_target = (self.i_decay * I[b, mask].detach().clamp(min=0, max=0.8*Vth))
+            low_bound_target = torch.tensor(0.)
+            target = self.beta * up_bound_target + (1 - self.beta) * low_bound_target
+            error_mask = mem_v_others >= Vth
+            mse_loss = self.mse(mem_v_others * error_mask, target * error_mask)
+            mem_losses = mem_losses + mse_loss
 
             # --- Record Accuracy ---
             spike_num += (mem_v >= 1).sum().item()
@@ -152,6 +155,10 @@ class MembraneLoss(torch.nn.Module):
 
     @property
     def alpha(self):
-        return torch.sigmoid(self.alpha_value)
+        # return torch.sigmoid(self.alpha_value)
+        return 1.
 
-
+    @property
+    def beta(self):
+        # return torch.sigmoid(self.beta_value)
+        return 0.5

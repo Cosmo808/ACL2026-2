@@ -20,13 +20,13 @@ class DynamicDataCollator(DefaultDataCollator):
         return examples
 
 
-def prepare_trainer(model, training_args, raw_datasets, compute_metrics, model_args, eval_dataset):
+def prepare_trainer(model, training_args, raw_datasets, compute_metrics):
     """Prepares and returns the configured Trainer instance."""
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=raw_datasets["train"] if training_args.do_train else None,
-        eval_dataset=eval_dataset if training_args.do_eval else None,
+        eval_dataset=raw_datasets["validation"] if training_args.do_eval else None,
         tokenizer=None,
         data_collator=DynamicDataCollator(),
         compute_metrics=compute_metrics,
