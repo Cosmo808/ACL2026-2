@@ -26,18 +26,12 @@ class SNNTokenizer(nn.Module):
         self.char_embedding = nn.Embedding(char_num, char_embed_dim, padding_idx=0)
 
         # === 2. Shared ANN Encoder (for boundary and reset prediction)===
-        self.context_encoder = ContextEncoder(d_model=char_embed_dim)
-        # self.context_encoder = nn.Sequential(
-        #     nn.Linear(char_embed_dim, 1024),
-        #     nn.LayerNorm(1024),
-        #     nn.GELU(),
-        #     nn.Linear(1024, 1024),
-        #     nn.LayerNorm(1024),
-        #     nn.GELU(),
-        #     nn.Linear(1024, char_embed_dim),
-        #     nn.LayerNorm(char_embed_dim),
-        #     nn.GELU(),
-        # )
+        # self.context_encoder = ContextEncoder(d_model=char_embed_dim)
+        self.context_encoder = nn.Sequential(
+            nn.Linear(char_embed_dim, char_embed_dim),
+            nn.LayerNorm(char_embed_dim),
+            nn.GELU(),
+        )
 
         # === 3. Boundary & Reset Predictors (identical structure) ===
         self.boundary_predictor = nn.Sequential(

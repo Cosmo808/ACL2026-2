@@ -32,7 +32,7 @@ class ModelArguments:
     dynamic_tokenization_merges: Optional[int] = field(default=0, metadata={"help": "Will perform the specified number of BPE merges during tokenization."})
     further_training_adapter_path: str = field(default="", metadata={"help": "The adapter path that will be further fine-tuned."})
 
-    char_embed_dim: int = field(default=512)
+    char_embed_dim: int = field(default=128)
     output_embed_dim: int = field(default=768)
     max_char_len: int = field(default=256)
     entropy: bool = field(default=False)

@@ -26,8 +26,8 @@ class ContextEncoder(nn.Module):
         self.r_r_bias = nn.Parameter(torch.Tensor(n_head, d_head).zero_())
         
     def _forward(self, dec_inp, r, dec_attn_mask=None):
-        # output = self.attn(dec_inp, r, self.r_w_bias, self.r_r_bias, attn_mask=dec_attn_mask)
-        output = self.pos_ff(dec_inp)
+        output = self.attn(dec_inp, r, self.r_w_bias, self.r_r_bias, attn_mask=dec_attn_mask)
+        output = self.pos_ff(output)
         return output
 
     def forward(self, input):

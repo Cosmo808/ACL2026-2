@@ -75,7 +75,7 @@ if __name__ == "__main__":
     snn_loss = MembraneLoss()
 
     # Training Loop
-    for epoch in range(5):
+    for epoch in range(2):
         total_losses = 0.0
         spike_acc, not_spike_acc = 0., 0.
         batch_count = 0
@@ -113,7 +113,7 @@ if __name__ == "__main__":
 
                 # --- Calculate SNN Loss ---
                 gt_idx = [torch.where(gt_boundaries[b])[0] for b in range(gt_boundaries.shape[0])]
-                gt_idx = [idx[1:] - 1 for idx in gt_idx]  # remove the first one; offset -1
+                gt_idx = [idx - 1 for idx in gt_idx]  # offset -1
                 snn_loss_value, acc = snn_loss(snn_tokenizer.node.past_v, snn_tokenizer.I, gt_idx)
 
                 # --- BP ---
@@ -126,7 +126,7 @@ if __name__ == "__main__":
                 not_spike_acc += acc['not_spike']
                 batch_count += 1
                 if batch_count % 100 == 0:
-                    print(f"Acc: {acc['spike']:.4f} / {acc['not_spike']:.4f}")
+                    print(f"Loss: {snn_loss_value:.4f}; Acc: {acc['spike']:.4f} / {acc['not_spike']:.4f}")
 
                 # Clean up SNN state
                 functional.reset_net(snn_tokenizer)

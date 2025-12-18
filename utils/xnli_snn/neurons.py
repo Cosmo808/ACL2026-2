@@ -127,11 +127,10 @@ class MembraneLoss(torch.nn.Module):
             # --- Encourage to Spike ---
             gt_i = gt_idx[b]
             mem_v = mem_seq[gt_i, b].squeeze(-1)
-            up_bound_target = (torch.tensor(Vth) * self.v_decay + self.i_decay * I[b, gt_i].detach().clamp(0))                                                                  .clamp(min=1.2*Vth, max=2*Vth)
+            up_bound_target = (torch.tensor(Vth) * self.v_decay + self.i_decay * I[b, gt_i].detach().clamp(0)).clamp(min=1.2*Vth, max=2*Vth)
             low_bound_target = torch.tensor(Vth)
             target = self.alpha * up_bound_target + (1 - self.alpha) * low_bound_target
-            error_mask = mem_v < Vth
-            mse_loss = self.mse(mem_v * error_mask, target * error_mask)
+            mse_loss = self.mse(mem_v, target)
             mem_losses = mem_losses + mse_loss
 
             # --- Discourage to Spike ---
@@ -141,8 +140,7 @@ class MembraneLoss(torch.nn.Module):
             up_bound_target = (self.i_decay * I[b, mask].detach().clamp(min=0, max=0.8*Vth))
             low_bound_target = torch.tensor(0.)
             target = self.beta * up_bound_target + (1 - self.beta) * low_bound_target
-            error_mask = mem_v_others >= Vth
-            mse_loss = self.mse(mem_v_others * error_mask, target * error_mask)
+            mse_loss = self.mse(mem_v_others, target)
             mem_losses = mem_losses + mse_loss
 
             # --- Record Accuracy ---
@@ -156,9 +154,9 @@ class MembraneLoss(torch.nn.Module):
     @property
     def alpha(self):
         # return torch.sigmoid(self.alpha_value)
-        return 1.
+        return 1.2
 
     @property
     def beta(self):
         # return torch.sigmoid(self.beta_value)
-        return 0.5
+        return 0.6

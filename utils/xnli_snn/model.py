@@ -105,11 +105,11 @@ class TkLM(nn.Module):
 
         # SNN membrane loss
         gt_idx = [torch.where(gt_boundaries[b])[0] for b in range(gt_boundaries.shape[0])]
-        gt_idx = [idx[1:] - 1 for idx in gt_idx]  # remove the first one, SNN cannot spike at first time point
+        gt_idx = [idx - 1 for idx in gt_idx]  # offset -1
         snn_loss, acc = self.snn_loss(self.snn_tokenizer.node.past_v, self.snn_tokenizer.I, gt_idx)
 
         # Total loss
-        aux_loss = snn_loss / 2. + reset_loss
+        aux_loss = snn_loss + reset_loss
         total_loss = lm_loss + self.lambda_aux * aux_loss
 
         # Clean up SNN state
