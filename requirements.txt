@@ -1,0 +1,8 @@
+torch==2.8.0+cu128
+spikingjelly==0.0.0.0.14
+tqdm==4.67.1
+sentencepiece==0.2.1
+transformers==4.45.2
+datasets==2.18.0
+peft==0.11.1
+numpy==1.26.4
