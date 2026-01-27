@@ -1,10 +1,10 @@
-/RTok Experiments/wandb/
-/RTok Experiments/output_lora_peft/
-/RTok Experiments/.idea/
+/RTok_Experiments/wandb/
+/RTok_Experiments/output_lora_peft/
+/RTok_Experiments/.idea/
 
-/GTok Experiments/output/
-/GTok Experiments/data/
-/GTok Experiments/.idea/
-/GTok Experiments/__pycache__/
-/GTok Experiments/utils/__pycache__/
-/GTok Experiments/scripts/
+/GTok_Experiments/output/
+/GTok_Experiments/data/
+/GTok_Experiments/.idea/
+/GTok_Experiments/__pycache__/
+/GTok_Experiments/utils/__pycache__/
+/GTok_Experiments/scripts/
