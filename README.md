@@ -12,6 +12,8 @@ We propose **SPEAK**, a tokenizer that integrates spiking neurons to explicitly 
 
 Experiments on 2 language models and 5 datasets spanning 16 languages demonstrate superior cross-lingual adaptability with competitive performance and efficiency.
 
+<img src="./img/method.jpg" width="100%" style="display: block; margin: 0 auto;">
+
 ## 2. Overview
 
 ### Core Methodology
